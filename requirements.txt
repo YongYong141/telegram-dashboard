@@ -1,10 +1,9 @@
-quart
-telethon
-flask-httpauth
-hypercornstreamlit
+streamlit
 telethon
 streamlit-autorefresh
 pandas
 Pillow
-easyocr
+easyocr==1.7.1
+torch --index-url https://download.pytorch.org/whl/cpu
+torchvision --index-url https://download.pytorch.org/whl/cpu
 numpy
