@@ -10,6 +10,7 @@ from streamlit_autorefresh import st_autorefresh
 import io
 from PIL import Image
 import easyocr # Cloud ပေါ်မှာ အဆင်ပြေပြေစာဖတ်နိုင်တဲ့ Library
+import pytesseract
 import numpy as np
 
 # --- CONFIGURATION ---
@@ -20,10 +21,18 @@ DB_FILE = 'dashboard_data.json'
 # Guatemala Banks Keywords
 BANK_KEYWORDS = ["banrural", "industrial", "g&t", "azteca", "bac", "bantrab", "promerica", "bam", "transferencia", "monto", "exitoso", "comprobante"]
 
-# Initialize EasyOCR
-@st.cache_resource
-def load_ocr():
-    return easyocr.Reader(['es', 'en']) # စပိန်ဘာသာနဲ့ အင်္ဂလိပ်ဘာသာကို ဖတ်မယ်
+if event.photo:
+    try:
+        photo_bytes = await event.download_media(file=bytes)
+        img = Image.open(io.BytesIO(photo_bytes))
+        # Pytesseract က Memory မစားဘဲ ပိုမြန်ပါတယ်
+        extracted = pytesseract.image_to_string(img).lower()
+        
+        if any(key in extracted for key in BANK_KEYWORDS):
+            if u_id not in db_now['staff_data'][phone]['depositors']:
+                db_now['staff_data'][phone]['depositors'].append(u_id)
+                db_now['total_deposits'] += 1
+    except: pass
 
 reader = load_ocr()
 
