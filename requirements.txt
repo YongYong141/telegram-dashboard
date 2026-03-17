@@ -1,0 +1,10 @@
+quart
+telethon
+flask-httpauth
+hypercornstreamlit
+telethon
+streamlit-autorefresh
+pandas
+Pillow
+easyocr
+numpy
