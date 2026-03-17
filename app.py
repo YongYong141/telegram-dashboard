@@ -16,7 +16,29 @@ API_HASH = '4e8e3896fb5b1960993eec6a36c1b932'
 DB_FILE = 'dashboard_data.json'
 BANK_KEYWORDS = ["banrural", "industrial", "g&t", "azteca", "bac", "bantrab", "promerica", "bam", "transferencia", "monto", "exitoso", "comprobante"]
 
-# --- DATABASE LOGIC ---
+# --- PAGE SETUP ---
+st.set_page_config(page_title="KPI Performance Dashboard", layout="wide")
+
+# Custom CSS for Modern Design
+st.markdown("""
+    <style>
+    .main { background-color: #f5f7f9; }
+    .stMetric {
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        border-left: 5px solid #007bff;
+    }
+    .stDataFrame { border-radius: 10px; }
+    h1 { color: #1e3a8a; font-family: 'Helvetica', sans-serif; }
+    .status-online { color: #10b981; font-weight: bold; }
+    </style>
+    """, unsafe_allow_html=True)
+
+st_autorefresh(interval=5000, key="refresh")
+
+# --- DATABASE LOGIC (NO CHANGES) ---
 def load_db():
     if os.path.exists(DB_FILE):
         try:
@@ -32,7 +54,7 @@ def save_db(data):
     with open(DB_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4)
 
-# --- TELEGRAM WORKER ---
+# --- TELEGRAM WORKER (NO CHANGES) ---
 async def telegram_worker(phone, nickname, code=None, hash=None, password=None):
     session_path = f'session_{phone.replace("+","").strip()}'
     client = TelegramClient(session_path, API_ID, API_HASH)
@@ -62,19 +84,13 @@ async def telegram_worker(phone, nickname, code=None, hash=None, password=None):
                 db_now = load_db()
                 u_id = event.sender_id
                 if phone not in db_now['staff_data']: return
-
-                # 1. Lead Update
                 if u_id not in db_now['global_customers']: db_now['global_customers'].append(u_id)
                 if u_id not in db_now['staff_data'][phone]['customers']:
                     db_now['staff_data'][phone]['customers'].append(u_id)
-
-                # 2. Age Check
                 msg = (event.message.message or "").lower()
                 if any(x in msg for x in ["15","16","17","18","19"]):
                     if u_id not in db_now['staff_data'][phone]['under_age']:
                         db_now['staff_data'][phone]['under_age'].append(u_id)
-
-                # 3. Receipt OCR Check
                 if event.photo:
                     try:
                         photo_bytes = await event.download_media(file=bytes)
@@ -97,90 +113,109 @@ def start_thread(phone, nickname):
         loop.run_until_complete(telegram_worker(phone, nickname))
     threading.Thread(target=run_loop, daemon=True).start()
 
-# --- STREAMLIT UI ---
-st.set_page_config(page_title="Guatemala Pro Dashboard", layout="wide")
-st_autorefresh(interval=5000, key="refresh")
+# --- MAIN UI ---
 db = load_db()
 
-st.title("📊 Guatemala Team Pro Dashboard")
-
-# --- SIDEBAR: LOGIN ---
+# Sidebar Design
 with st.sidebar:
-    st.header("🔐 Staff Login")
-    ph = st.text_input("Phone Number")
-    nk = st.text_input("Nickname")
+    st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=100)
+    st.title("Admin Portal")
+    st.markdown("---")
+    st.subheader("🔐 Staff Connection")
+    ph = st.text_input("Phone Number", placeholder="+95...")
+    nk = st.text_input("Staff Nickname", placeholder="Name")
+    
     if "h_hash" not in st.session_state:
-        if st.button("Send OTP"):
+        if st.button("Get OTP Code", use_container_width=True):
             res = asyncio.run(telegram_worker(ph, nk))
             if isinstance(res, str) and "Error" not in res:
                 st.session_state.h_hash = res; st.success("OTP Sent!")
             else: st.error(res)
     else:
-        otp = st.text_input("OTP Code")
-        pw = st.text_input("2FA Password", type="password")
-        if st.button("Connect"):
+        otp = st.text_input("Enter 5-digit OTP")
+        pw = st.text_input("2FA Password (If any)", type="password")
+        if st.button("Authorize & Connect", use_container_width=True, type="primary"):
             f = asyncio.run(telegram_worker(ph, nk, otp, st.session_state.h_hash, pw))
             if f is None:
                 start_thread(ph, nk); st.success("Connected!"); del st.session_state.h_hash
             else: st.error(f)
 
-# --- MAIN METRICS ---
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Net Leads", len(db['global_customers']))
-c2.metric("Verified Deposits", db['total_deposits'])
-c3.metric("Under-age", sum(len(s.get('under_age', [])) for s in db['staff_data'].values()))
-c4.metric("Total Deleted", db.get('total_deleted', 0))
+# Header Section
+st.title("📈 Performance Analytics")
+st.markdown(f"**Last Sync:** {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+# Top Metrics with Design
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("🌐 Total Net Leads", len(db['global_customers']), delta="Real-time")
+m2.metric("💰 Verified Deposits", db['total_deposits'], delta="By OCR", delta_color="normal")
+m3.metric("🔞 Under-age (15-19)", sum(len(s.get('under_age', [])) for s in db['staff_data'].values()))
+m4.metric("🗑️ Total Deleted", db.get('total_deleted', 0))
 
 st.markdown("---")
 
-# --- PERFORMANCE TABLE ---
-st.subheader("👨‍💼 Staff Performance")
+# Data Presentation Table
+st.subheader("👨‍💼 Active Team Performance")
 rows = []
 for p, s in db['staff_data'].items():
     l, d = len(s['customers']), len(s['depositors'])
-    rows.append({"Staff": s['nickname'], "Phone": p, "Leads": l, "Deposits": d, "Conv%": f"{(d/l*100 if l>0 else 0):.1f}%"})
-if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    rows.append({
+        "Staff Name": s['nickname'],
+        "Telegram ID": p,
+        "Leads": l,
+        "Deposits": d,
+        "U-Age": len(s.get('under_age', [])),
+        "Conversion": f"{(d/l*100 if l>0 else 0):.1f}%",
+        "Status": "🟢 Active"
+    })
 
-# --- ADMIN TOOLS (ကျန်နေခဲ့သော အပိုင်းများ) ---
+if rows:
+    df = pd.DataFrame(rows)
+    st.table(df) # table ပုံစံက ပိုပြီး ရှင်းလင်းတည်ငြိမ်ပါတယ်
+else:
+    st.info("No active staff connected yet.")
+
+# Admin Tools Section
 st.markdown("---")
-st.subheader("🛠 Admin Management")
-col_tools, col_resets = st.columns(2)
+st.subheader("🛠️ Management Tools")
+t1, t2 = st.columns(2)
 
-with col_tools:
-    st.write("**Account & Data Control**")
-    staff_list = {f"{s['nickname']} ({p})": p for p, s in db['staff_data'].items()}
-    
-    with st.expander("🛡 Delete Lead / Deduct Deposit"):
-        target_staff = st.selectbox("Select Staff", list(staff_list.keys()) if staff_list else ["None"], key="staff_sel")
-        if st.button("Delete Last Lead") and staff_list:
-            p_t = staff_list[target_staff]
-            if db['staff_data'][p_t]['customers']:
-                cid = db['staff_data'][p_t]['customers'].pop()
-                if cid in db['global_customers']: db['global_customers'].remove(cid)
-                db['total_deleted'] += 1; save_db(db); st.rerun()
+with t1:
+    with st.expander("📝 Manual Adjustments"):
+        staff_list = {f"{s['nickname']} ({p})": p for p, s in db['staff_data'].items()}
+        target = st.selectbox("Select Staff Account", list(staff_list.keys()) if staff_list else ["None"])
         
-        if st.button("Deduct 1 Deposit") and staff_list:
-            p_t = staff_list[target_staff]
-            if db['staff_data'][p_t]['depositors']:
-                db['staff_data'][p_t]['depositors'].pop()
-                db['total_deposits'] = max(0, db['total_deposits'] - 1)
+        btn_col1, btn_col2 = st.columns(2)
+        if btn_col1.button("➖ Delete Last Lead", use_container_width=True):
+            if staff_list:
+                p_t = staff_list[target]
+                if db['staff_data'][p_t]['customers']:
+                    cid = db['staff_data'][p_t]['customers'].pop()
+                    if cid in db['global_customers']: db['global_customers'].remove(cid)
+                    db['total_deleted'] += 1; save_db(db); st.rerun()
+                    
+        if btn_col2.button("📉 Deduct 1 Deposit", use_container_width=True):
+            if staff_list:
+                p_t = staff_list[target]
+                if db['staff_data'][p_t]['depositors']:
+                    db['staff_data'][p_t]['depositors'].pop()
+                    db['total_deposits'] = max(0, db['total_deposits'] - 1)
+                    save_db(db); st.rerun()
+
+with t2:
+    with st.expander("⚙️ System Control"):
+        if st.button("🧹 Clear KPI Data (Keep Accounts)", use_container_width=True):
+            db['global_customers'] = []; db['total_deleted'] = 0; db['total_deposits'] = 0
+            for p in db['staff_data']:
+                db['staff_data'][p].update({'customers': [], 'depositors': [], 'under_age': []})
+            save_db(db); st.rerun()
+            
+        if st.button("🚪 Logout Selected Account", use_container_width=True):
+            if staff_list:
+                p_t = staff_list[target]
+                del db['staff_data'][p_t]
                 save_db(db); st.rerun()
 
-    with st.expander("🚪 Logout / Remove Account"):
-        to_logout = st.selectbox("Account to Remove", list(staff_list.keys()) if staff_list else ["None"], key="out_sel")
-        if st.button("Logout Selected") and staff_list:
-            p_t = staff_list[to_logout]
-            del db['staff_data'][p_t]
-            save_db(db); st.rerun()
-
-with col_resets:
-    st.write("**System Maintenance**")
-    if st.button("🧹 Reset KPI Data Only", help="အကောင့်တွေမထွက်ဘဲ ဂဏန်းတွေပဲ သုညပြန်လုပ်မယ်"):
-        db['global_customers'] = []; db['total_deleted'] = 0; db['total_deposits'] = 0
-        for p in db['staff_data']:
-            db['staff_data'][p].update({'customers': [], 'depositors': [], 'under_age': []})
-        save_db(db); st.rerun()
-
-    if st.button("🚫 Full System Reset", type="primary"):
-        if os.path.exists(DB_FILE): os.remove(DB_FILE)
-        st.rerun()
+# Full Reset in Sidebar for safety
+if st.sidebar.button("⚠️ Full System Reset", type="secondary"):
+    if os.path.exists(DB_FILE): os.remove(DB_FILE)
+    st.rerun()
