@@ -10,8 +10,8 @@ import io
 from PIL import Image
 import pytesseract
 
-# --- 1. THEME & UI ---
-st.set_page_config(page_title="Guatemala KPI Ultimate", page_icon="🌙", layout="wide")
+# --- 1. APP CONFIG ---
+st.set_page_config(page_title="KPI Final Master", page_icon="🌙", layout="wide")
 st.markdown("""
     <style>
     .stApp { background-color: #020617; color: #f8fafc; }
@@ -28,8 +28,7 @@ st_autorefresh(interval=5000, key="refresh")
 API_ID = 38792395
 API_HASH = '4e8e3896fb5b1960993eec6a36c1b932'
 DB_FILE = 'dashboard_data.json'
-# ငွေလွှဲပြေစာ (Physical Paper) မှာပါတတ်တဲ့ စာသားတွေပါ ထပ်တိုးထားပါတယ်
-BANK_KEYWORDS = ["banrural", "industrial", "g&t", "azteca", "bac", "bantrab", "promerica", "bam", "transferencia", "monto", "exitoso", "comprobante", "boleta", "deposito", "efectivo"]
+BANK_KEYWORDS = ["banrural", "industrial", "g&t", "azteca", "bac", "bantrab", "promerica", "bam", "transferencia", "monto", "exitoso", "comprobante", "boleta", "deposito"]
 
 def load_db():
     if os.path.exists(DB_FILE):
@@ -42,12 +41,12 @@ def save_db(data):
     with open(DB_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, indent=4)
 
 def default_db():
-    return {'global_customers': [], 'staff_data': {}, 'total_deleted': 0, 'total_deposits': 0, 'total_under_age': 0}
+    return {'global_customers': [], 'staff_data': {}, 'total_deleted': 0, 'total_deposits': 0}
 
-# --- 3. TELEGRAM CORE (ALL LOGIC INCLUDED) ---
+# --- 3. TELEGRAM CORE LOGIC ---
 async def telegram_worker(phone, nickname, code=None, h_hash=None, password=None):
-    session_path = f'session_{phone.replace("+","").strip()}'
-    client = TelegramClient(session_path, API_ID, API_HASH)
+    session = f'session_{phone.replace("+","").strip()}'
+    client = TelegramClient(session, API_ID, API_HASH)
     try:
         await client.connect()
         if not await client.is_user_authorized():
@@ -62,9 +61,10 @@ async def telegram_worker(phone, nickname, code=None, h_hash=None, password=None
         
         db = load_db()
         if phone not in db['staff_data']:
-            db['staff_data'][phone] = {'nickname': nickname, 'customers': [], 'under_age': [], 'depositors': [], 'deleted_chats': 0, 'status': "Online 🟢"}
+            db['staff_data'][phone] = {'nickname': nickname, 'customers': [], 'under_age_count': 0, 'depositors': [], 'deleted_chats': 0}
         save_db(db)
 
+        # A. စာအသစ်ဝင်လျှင် အသက်နှင့် လူဝင်စာရင်း စစ်ခြင်း
         @client.on(events.NewMessage(incoming=True))
         async def handler(event):
             if event.is_private:
@@ -72,19 +72,17 @@ async def telegram_worker(phone, nickname, code=None, h_hash=None, password=None
                 u_id = event.sender_id
                 if phone not in db_now['staff_data']: return
                 
-                # 1. Lead Count
+                # 1. Leads
                 if u_id not in db_now['global_customers']: db_now['global_customers'].append(u_id)
                 if u_id not in db_now['staff_data'][phone]['customers']:
                     db_now['staff_data'][phone]['customers'].append(u_id)
                 
-                # 2. Under Age Check (15-19)
+                # 2. Under Age (15-19) - စာထဲမှာပါတာနဲ့ တိုးမယ်
                 msg = (event.message.message or "").lower()
                 if any(x in msg for x in ["15","16","17","18","19"]):
-                    if u_id not in db_now['staff_data'][phone]['under_age']:
-                        db_now['staff_data'][phone]['under_age'].append(u_id)
-                        db_now['total_under_age'] = sum(len(s.get('under_age', [])) for s in db_now['staff_data'].values())
+                    db_now['staff_data'][phone]['under_age_count'] += 1
 
-                # 3. Deposit Check (Screenshot & Paper Receipt OCR)
+                # 3. OCR (Receipt Check)
                 if event.photo:
                     try:
                         photo_bytes = await event.download_media(file=bytes)
@@ -97,9 +95,9 @@ async def telegram_worker(phone, nickname, code=None, h_hash=None, password=None
                     except: pass
                 save_db(db_now)
 
-        # 4. Background Chat-Delete Check (Sync with Main Dashboard)
+        # B. Delete Chat Check (Chat တစ်ခုလုံးဖျက်မှ နုတ်မည့်စနစ်)
         while True:
-            await asyncio.sleep(300)
+            await asyncio.sleep(300) 
             db_chk = load_db()
             if phone in db_chk['staff_data']:
                 active_cids = db_chk['staff_data'][phone]['customers'][:]
@@ -107,12 +105,11 @@ async def telegram_worker(phone, nickname, code=None, h_hash=None, password=None
                     try:
                         await client.get_input_entity(cid)
                     except:
-                        # Chat List ဖျက်ခြင်း သို့ Block ခြင်း
+                        # Chat List တစ်ခုလုံးဖျက်သွားလျှင် (သို့) Block သွားလျှင်
                         db_chk['staff_data'][phone]['customers'].remove(cid)
                         if cid in db_chk['global_customers']: db_chk['global_customers'].remove(cid)
                         db_chk['staff_data'][phone]['deleted_chats'] += 1
-                        db_chk['total_deleted'] += 1 # Global Dashboard မှာပါ လျော့ဖို့
-                        # Deposit ပါရင်ပါ နုတ်ပေးသည်
+                        db_chk['total_deleted'] += 1
                         if cid in db_chk['staff_data'][phone]['depositors']:
                             db_chk['staff_data'][phone]['depositors'].remove(cid)
                             db_chk['total_deposits'] = max(0, db_chk['total_deposits'] - 1)
@@ -132,7 +129,7 @@ def start_thread(phone, nickname):
 db = load_db()
 
 with st.sidebar:
-    st.title("🛡️ Admin Panel")
+    st.title("🛡️ Admin Portal")
     ph = st.text_input("Phone Number")
     nk = st.text_input("Staff Name")
     if "step" not in st.session_state: st.session_state.step = "GET_OTP"
@@ -146,54 +143,55 @@ with st.sidebar:
     elif st.session_state.step == "VERIFY":
         otp = st.text_input("OTP Code")
         pwd = st.text_input("2FA Password", type="password")
-        if st.button("✅ Connect"):
+        if st.button("✅ Link Account"):
             f = asyncio.run(telegram_worker(ph, nk, otp, st.session_state.h_hash, pwd))
             if f is None or f == "Online 🟢":
                 start_thread(ph, nk); st.session_state.step = "GET_OTP"; st.rerun()
             elif f == "2FA_REQUIRED": st.warning("Input 2FA!")
             else: st.error(f); st.session_state.step = "GET_OTP"
 
-# MAIN METRICS (Global Dashboard Sync)
-total_leads = len(db['global_customers'])
-total_deps = db['total_deposits']
-conv_rate = (total_deps / total_leads * 100) if total_leads > 0 else 0
+# TOTAL METRICS
+leads = len(db['global_customers'])
+deps = db['total_deposits']
+total_percent = (deps / leads * 100) if leads > 0 else 0
+total_u_age = sum(s.get('under_age_count', 0) for s in db['staff_data'].values())
 
-st.title("🇬🇹 PERFORMANCE DASHBOARD")
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("🌐 GLOBAL LEADS", total_leads)
-m2.metric("💰 TOTAL DEPOSITS", total_deps)
-m3.metric("🔞 UNDER-AGE", db.get('total_under_age', 0))
-m4.metric("🗑️ TOTAL REMOVED", db.get('total_deleted', 0))
+st.title("⭐ GUATEMALA PERFORMANCE MASTER ⭐")
+m1, m2, m3, m4, m5 = st.columns(5)
+m1.metric("🌐 GLOBAL LEADS", leads)
+m2.metric("💰 TOTAL DEPS", deps)
+m3.metric("📊 TOTAL %", f"{total_percent:.1f}%")
+m4.metric("🔞 TOTAL U-AGE", total_u_age)
+m5.metric("🗑️ CHATS REMOVED", db.get('total_deleted', 0))
 
 st.markdown("---")
 
-col_table, col_mgmt = st.columns([2, 1])
+col_left, col_right = st.columns([2, 1])
 
-with col_table:
+with col_left:
     st.subheader("👨‍💼 Staff Performance Table")
     rows = []
     for p, s in db['staff_data'].items():
         l, d = len(s['customers']), len(s['depositors'])
         rows.append({
             "Staff": s['nickname'], "Leads": l, "Deps": d,
-            "U-Age": len(s.get('under_age', [])), "Del Chat": s.get('deleted_chats', 0),
-            "Conv%": f"{(d/l*100 if l>0 else 0):.1f}%"
+            "U-Age": s.get('under_age_count', 0), "Del-Chat": s.get('deleted_chats', 0),
+            "Conv %": f"{(d/l*100 if l>0 else 0):.1f}%"
         })
     if rows: st.table(pd.DataFrame(rows))
 
-with col_mgmt:
-    st.subheader("🛠️ Management")
+with col_right:
+    st.subheader("🛠️ Control Panel")
     staff_map = {f"{s['nickname']} ({p})": p for p, s in db['staff_data'].items()}
     if staff_map:
         selected = st.selectbox("Select Account", list(staff_map.keys()))
         target = staff_map[selected]
         
-        # Manual Adjustments
         c1, c2 = st.columns(2)
         if c1.button("➖ Delete Lead"):
             if db['staff_data'][target]['customers']:
                 db['staff_data'][target]['customers'].pop()
-                if len(db['global_customers']) > 0: db['global_customers'].pop()
+                if db['global_customers']: db['global_customers'].pop()
                 db['total_deleted'] += 1; save_db(db); st.rerun()
 
         if c2.button("📉 Deduct Dep"):
@@ -205,7 +203,7 @@ with col_mgmt:
         if st.button("🚪 Logout Account", type="primary"):
             del db['staff_data'][target]; save_db(db); st.rerun()
 
-    if st.button("🧹 Reset Stats"):
-        db['global_customers'] = []; db['total_deleted'] = 0; db['total_deposits'] = 0; db['total_under_age'] = 0
-        for p in db['staff_data']: db['staff_data'][p].update({'customers': [], 'depositors': [], 'under_age': [], 'deleted_chats': 0})
+    if st.button("🧹 Reset All Stats"):
+        db['global_customers'] = []; db['total_deleted'] = 0; db['total_deposits'] = 0
+        for p in db['staff_data']: db['staff_data'][p].update({'customers': [], 'depositors': [], 'under_age_count': 0, 'deleted_chats': 0})
         save_db(db); st.rerun()
