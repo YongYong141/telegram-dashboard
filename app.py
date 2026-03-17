@@ -1,3 +1,4 @@
+from streamlit_autorefresh import st_autorefresh
 import streamlit as st
 from telethon import TelegramClient, events, errors
 import asyncio
