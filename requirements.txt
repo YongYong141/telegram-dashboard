@@ -3,7 +3,6 @@ telethon
 streamlit-autorefresh
 pandas
 Pillow
-easyocr==1.7.1
-torch --index-url https://download.pytorch.org/whl/cpu
-torchvision --index-url https://download.pytorch.org/whl/cpu
+easyocr
 numpy
+opencv-python-headless
