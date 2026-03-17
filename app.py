@@ -11,9 +11,9 @@ from PIL import Image
 import pytesseract
 
 # --- 1. APP CONFIGURATION ---
-st.set_page_config(page_title="Guatemala KPI Pro", page_icon="🌙", layout="wide")
+st.set_page_config(page_title="KPI Dark Dashboard", page_icon="🌙", layout="wide")
 
-# Deep Dark Theme Styling
+# CSS for Dark Theme
 st.markdown("""
     <style>
     .stApp { background-color: #0f172a; color: #f8fafc; }
@@ -26,17 +26,16 @@ st.markdown("""
     }
     .stTable { background-color: #1e293b; border-radius: 12px; border: 1px solid #334155; }
     thead tr th { background-color: #334155 !important; color: #38bdf8 !important; }
-    tbody tr td { color: #e2e8f0 !important; }
-    .stButton>button { border-radius: 10px; background-color: #0ea5e9; color: white; border: none; transition: 0.3s; width: 100%; }
+    .stButton>button { border-radius: 10px; background-color: #0ea5e9; color: white; border: none; transition: 0.3s; width: 100%; height: 45px; font-weight: bold; }
     .stButton>button:hover { background-color: #38bdf8; transform: translateY(-2px); }
     [data-testid="stSidebar"] { background-color: #020617 !important; border-right: 1px solid #1e293b; }
-    h1, h2, h3 { color: #38bdf8 !important; font-family: 'Inter', sans-serif; }
+    h1, h2, h3 { color: #38bdf8 !important; }
     </style>
     """, unsafe_allow_html=True)
 
 st_autorefresh(interval=5000, key="refresh")
 
-# --- 2. DATA CONSTANTS ---
+# --- 2. DATA CONFIG ---
 API_ID = 38792395
 API_HASH = '4e8e3896fb5b1960993eec6a36c1b932'
 DB_FILE = 'dashboard_data.json'
@@ -72,7 +71,6 @@ async def telegram_worker(phone, nickname, code=None, hash=None, password=None):
                 sent = await client.send_code_request(phone)
                 return sent.phone_code_hash
         
-        # Add Staff if Authorized
         db = load_db()
         if phone not in db['staff_data']:
             db['staff_data'][phone] = {'nickname': nickname, 'customers': [], 'under_age': [], 'depositors': [], 'status': "Online 🟢"}
@@ -83,20 +81,20 @@ async def telegram_worker(phone, nickname, code=None, hash=None, password=None):
             if event.is_private:
                 db_now = load_db()
                 u_id = event.sender_id
-                if phone not in db_now['staff_data']: return # Security check
+                if phone not in db_now['staff_data']: return 
                 
                 # Update Leads
                 if u_id not in db_now['global_customers']: db_now['global_customers'].append(u_id)
                 if u_id not in db_now['staff_data'][phone]['customers']:
                     db_now['staff_data'][phone]['customers'].append(u_id)
                 
-                # Update Age
+                # Update Age (15-19)
                 msg = (event.message.message or "").lower()
                 if any(x in msg for x in ["15","16","17","18","19"]):
                     if u_id not in db_now['staff_data'][phone]['under_age']:
                         db_now['staff_data'][phone]['under_age'].append(u_id)
                 
-                # OCR for Deposits
+                # OCR Check for Deposits
                 if event.photo:
                     try:
                         photo_bytes = await event.download_media(file=bytes)
@@ -119,98 +117,99 @@ def start_thread(phone, nickname):
         loop.run_until_complete(telegram_worker(phone, nickname))
     threading.Thread(target=run_loop, daemon=True).start()
 
-# --- 5. MAIN UI ---
+# --- 5. DASHBOARD MAIN UI ---
 db = load_db()
 
-# Sidebar Login System
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=80)
-    st.title("Admin Access")
-    ph = st.text_input("Staff Phone", placeholder="+95...")
-    nk = st.text_input("Staff Name", placeholder="E.g. Jhon")
+    st.title("🛡️ Admin Portal")
+    ph_input = st.text_input("Phone Number")
+    nk_input = st.text_input("Nickname")
     
     if "h_hash" not in st.session_state:
-        if st.button("🚀 Send OTP Code"):
-            res = asyncio.run(telegram_worker(ph, nk))
+        if st.button("🚀 Send OTP"):
+            res = asyncio.run(telegram_worker(ph_input, nk_input))
             if isinstance(res, str) and "Error" not in res:
                 st.session_state.h_hash = res; st.success("OTP Sent!")
             else: st.error(res)
     else:
-        otp = st.text_input("OTP Code")
-        pw = st.text_input("2FA Password", type="password")
+        otp_in = st.text_input("OTP Code")
+        pw_in = st.text_input("2FA Password", type="password")
         if st.button("✅ Link Account"):
-            f = asyncio.run(telegram_worker(ph, nk, otp, st.session_state.h_hash, pw))
+            f = asyncio.run(telegram_worker(ph_input, nk_input, otp_in, st.session_state.h_hash, pw_in))
             if f is None:
-                start_thread(ph, nk); st.success("Linked Successfully!"); del st.session_state.h_hash
+                start_thread(ph_input, nk_input); st.success("Connected!"); del st.session_state.h_hash
             else: st.error(f)
     
     st.markdown("---")
-    if st.button("💀 Critical System Reset", type="secondary"):
+    if st.button("🚫 Full System Reset"):
         if os.path.exists(DB_FILE): os.remove(DB_FILE)
         st.rerun()
 
-# Main Header
-st.markdown("<h1 style='text-align: center;'>🇬🇹 GUATEMALA PRO DASHBOARD</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>🇬🇹 GUATEMALA PERFORMANCE (DARK MODE)</h1>", unsafe_allow_html=True)
 
-# Metrics Grid
+# Main Stats
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("🌐 TOTAL LEADS", len(db['global_customers']))
-m2.metric("💰 VERIFIED DEPOSITS", db['total_deposits'])
+m1.metric("🌐 GLOBAL LEADS", len(db['global_customers']))
+m2.metric("💰 TOTAL DEPOSITS", db['total_deposits'])
 m3.metric("🔞 UNDER-AGE", sum(len(s.get('under_age', [])) for s in db['staff_data'].values()))
 m4.metric("🗑️ REMOVED", db.get('total_deleted', 0))
 
 st.markdown("---")
 
-# Data Table & Management
-col_left, col_right = st.columns([1.8, 1])
+col_left, col_right = st.columns([1.5, 1])
 
 with col_left:
-    st.subheader("👨‍💼 Team Performance")
-    staff_rows = []
+    st.subheader("👨‍💼 Staff Productivity")
+    rows = []
     for p, s in db['staff_data'].items():
         l, d = len(s['customers']), len(s['depositors'])
-        staff_rows.append({
+        rows.append({
             "Staff": s['nickname'], "Phone": p, "Leads": l, 
-            "Deps": d, "Conv%": f"{(d/l*100 if l>0 else 0):.1f}%"
+            "Deps": d, "U-Age": len(s.get('under_age', [])), 
+            "Status": s.get('status', 'Offline')
         })
-    if staff_rows: st.table(pd.DataFrame(staff_rows))
-    else: st.info("No active staff monitored yet.")
+    if rows: st.table(pd.DataFrame(rows))
+    else: st.info("No active accounts found.")
 
 with col_right:
     st.subheader("🛠️ Management Console")
-    # Account Selector for Individual Actions
-    staff_map = {f"{s['nickname']} ({p})": p for p, s in db['staff_data'].items()}
+    # ဝန်ထမ်းရွေးချယ်ရန် Selector
+    staff_options = {f"{s['nickname']} ({p})": p for p, s in db['staff_data'].items()}
     
-    if staff_map:
-        selected_key = st.selectbox("Choose Account", list(staff_map.keys()))
-        target_phone = staff_map[selected_key]
+    if staff_options:
+        selected_account = st.selectbox("Select Account to Manage", list(staff_options.keys()))
+        target_p = staff_options[selected_account]
         
-        # Tools for individual
-        c1, c2 = st.columns(2)
-        if c1.button("➖ Delete Lead"):
-            if db['staff_data'][target_phone]['customers']:
-                cid = db['staff_data'][target_phone]['customers'].pop()
-                if cid in db['global_customers']: db['global_customers'].remove(cid)
-                db['total_deleted'] += 1; save_db(db); st.rerun()
+        st.write(f"Actions for: **{selected_account}**")
+        
+        # ၁။ တစ်ယောက်ချင်း Leads လျော့တာ
+        if st.button("➖ Delete Last Lead from this Account"):
+            if db['staff_data'][target_p]['customers']:
+                last_cid = db['staff_data'][target_p]['customers'].pop()
+                if last_cid in db['global_customers']: db['global_customers'].remove(last_cid)
+                db['total_deleted'] += 1
+                save_db(db); st.rerun()
 
-        if c2.button("📉 Deduct Dep"):
-            if db['staff_data'][target_phone]['depositors']:
-                db['staff_data'][target_phone]['depositors'].pop()
+        # ၂။ တစ်ယောက်ချင်း Deposit လျော့တာ
+        if st.button("📉 Deduct 1 Deposit from this Account"):
+            if db['staff_data'][target_p]['depositors']:
+                db['staff_data'][target_p]['depositors'].pop()
                 db['total_deposits'] = max(0, db['total_deposits'] - 1)
                 save_db(db); st.rerun()
 
         st.markdown("---")
-        # --- FIXED INDIVIDUAL LOGOUT ---
-        if st.button("🚪 Logout Selected Account", type="primary"):
-            if target_phone in db['staff_data']:
-                del db['staff_data'][target_phone] # အဲ့ဒီတစ်ယောက်တည်းကိုပဲ database ကနေဖယ်မယ်
+        # ၃။ တစ်ယောက်ချင်း Logout လုပ်တာ
+        if st.button("🚪 Logout Selected Account Only", type="primary"):
+            if target_p in db['staff_data']:
+                del db['staff_data'][target_p]
                 save_db(db)
-                st.success(f"Removed {selected_key}")
+                st.success(f"Removed {selected_account}")
                 st.rerun()
+    else:
+        st.write("Connect an account to see management tools.")
 
-    else: st.write("No management options available.")
-
-    if st.button("🧹 Clear Stats Only"):
+    if st.button("🧹 Reset All Numbers (Keep Accounts)"):
         db['global_customers'] = []; db['total_deleted'] = 0; db['total_deposits'] = 0
-        for p in db['staff_data']: db['staff_data'][p].update({'customers': [], 'depositors': [], 'under_age': []})
+        for p in db['staff_data']:
+            db['staff_data'][p].update({'customers': [], 'depositors': [], 'under_age': []})
         save_db(db); st.rerun()
