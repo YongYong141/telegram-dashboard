@@ -3,6 +3,4 @@ telethon
 streamlit-autorefresh
 pandas
 Pillow
-easyocr
-numpy
-opencv-python-headless
+pytesseract
