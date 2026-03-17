@@ -1,4 +1,3 @@
-from streamlit_autorefresh import st_autorefresh
 import streamlit as st
 from telethon import TelegramClient, events, errors
 import asyncio
@@ -9,33 +8,15 @@ import pandas as pd
 from streamlit_autorefresh import st_autorefresh
 import io
 from PIL import Image
-import easyocr # Cloud ပေါ်မှာ အဆင်ပြေပြေစာဖတ်နိုင်တဲ့ Library
 import pytesseract
-import numpy as np
 
 # --- CONFIGURATION ---
 API_ID = 38792395
 API_HASH = '4e8e3896fb5b1960993eec6a36c1b932'
 DB_FILE = 'dashboard_data.json'
-
-# Guatemala Banks Keywords
 BANK_KEYWORDS = ["banrural", "industrial", "g&t", "azteca", "bac", "bantrab", "promerica", "bam", "transferencia", "monto", "exitoso", "comprobante"]
 
-if event.photo:
-    try:
-        photo_bytes = await event.download_media(file=bytes)
-        img = Image.open(io.BytesIO(photo_bytes))
-        # Pytesseract က Memory မစားဘဲ ပိုမြန်ပါတယ်
-        extracted = pytesseract.image_to_string(img).lower()
-        
-        if any(key in extracted for key in BANK_KEYWORDS):
-            if u_id not in db_now['staff_data'][phone]['depositors']:
-                db_now['staff_data'][phone]['depositors'].append(u_id)
-                db_now['total_deposits'] += 1
-    except: pass
-
-reader = load_ocr()
-
+# --- DATABASE ---
 def load_db():
     if os.path.exists(DB_FILE):
         try:
@@ -84,28 +65,88 @@ async def telegram_worker(phone, nickname, code=None, hash=None, password=None):
                 if u_id not in db_now['staff_data'][phone]['customers']:
                     db_now['staff_data'][phone]['customers'].append(u_id)
 
-                msg_text = (event.message.message or "").lower()
-                if any(x in msg_text for x in ["15","16","17","18","19"]):
+                msg = (event.message.message or "").lower()
+                if any(x in msg for x in ["15","16","17","18","19"]):
                     if u_id not in db_now['staff_data'][phone]['under_age']:
                         db_now['staff_data'][phone]['under_age'].append(u_id)
 
                 if event.photo:
                     try:
                         photo_bytes = await event.download_media(file=bytes)
-                        img_array = np.array(Image.open(io.BytesIO(photo_bytes)))
-                        result = reader.readtext(img_array, detail=0)
-                        extracted = " ".join(result).lower()
-                        
-                        if any(key in extracted for key in BANK_KEYWORDS):
+                        img = Image.open(io.BytesIO(photo_bytes))
+                        # OCR စစ်ဆေးခြင်း
+                        txt = pytesseract.image_to_string(img).lower()
+                        if any(k in txt for k in BANK_KEYWORDS):
                             if u_id not in db_now['staff_data'][phone]['depositors']:
                                 db_now['staff_data'][phone]['depositors'].append(u_id)
                                 db_now['total_deposits'] += 1
                     except: pass
-                
                 save_db(db_now)
         await client.run_until_disconnected()
     except Exception as e: return str(e)
     finally: await client.disconnect()
 
-# --- STREAMLIT UI (PC Version အတိုင်း အကုန်ပြန်ပါသည်) ---
-# ... (အရင်က ပေးထားတဲ့ UI code အကုန်လုံးကို ဒီမှာ ပြန်သုံးနိုင်ပါတယ်)
+def start_thread(phone, nickname):
+    # Streamlit Cloud အတွက် thread ကို အခုလို သီးသန့် loop နဲ့ run ရပါမယ်
+    def run_async():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(telegram_worker(phone, nickname))
+    t = threading.Thread(target=run_async, daemon=True)
+    t.start()
+
+# --- STREAMLIT UI ---
+st.set_page_config(page_title="KPI Dashboard", layout="wide")
+st_autorefresh(interval=5000, key="refresh")
+db = load_db()
+
+st.title("🇬🇹 Guatemala KPI Dashboard")
+
+# SideBar Login
+with st.sidebar:
+    st.header("🔐 Staff Login")
+    ph_input = st.text_input("Phone (+95...)")
+    nk_input = st.text_input("Nickname")
+    
+    if "h_hash" not in st.session_state:
+        if st.button("Get OTP"):
+            res = asyncio.run(telegram_worker(ph_input, nk_input))
+            if isinstance(res, str) and "Error" not in res:
+                st.session_state.h_hash = res
+                st.success("OTP Sent!")
+            else: st.error(res)
+    else:
+        otp_code = st.text_input("OTP Code")
+        pw_2fa = st.text_input("2FA Password", type="password")
+        if st.button("Login"):
+            f = asyncio.run(telegram_worker(ph_input, nk_input, otp_code, st.session_state.h_hash, pw_2fa))
+            if f is None:
+                start_thread(ph_input, nk_input)
+                st.success("Connected!")
+                del st.session_state.h_hash
+            else: st.error(f)
+
+# Main Dashboard
+c1, c2, c3 = st.columns(3)
+c1.metric("Total Net Leads", len(db['global_customers']))
+c2.metric("Verified Deposits", db['total_deposits'])
+c3.metric("Under-age (15-19)", sum(len(s.get('under_age', [])) for s in db['staff_data'].values()))
+
+st.markdown("---")
+st.subheader("👨‍💼 Performance Table")
+rows = []
+for p, s in db['staff_data'].items():
+    rows.append({
+        "Staff": s['nickname'], 
+        "Leads": len(s['customers']), 
+        "Deposits": len(s['depositors']),
+        "Under-age": len(s.get('under_age', []))
+    })
+if rows: st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+# Reset Button
+if st.button("🧹 Reset Data Only"):
+    db['global_customers'] = []; db['total_deposits'] = 0
+    for p in db['staff_data']:
+        db['staff_data'][p].update({'customers': [], 'depositors': [], 'under_age': []})
+    save_db(db); st.rerun()
