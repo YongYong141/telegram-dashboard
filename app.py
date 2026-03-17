@@ -16,34 +16,54 @@ API_HASH = '4e8e3896fb5b1960993eec6a36c1b932'
 DB_FILE = 'dashboard_data.json'
 BANK_KEYWORDS = ["banrural", "industrial", "g&t", "azteca", "bac", "bantrab", "promerica", "bam", "transferencia", "monto", "exitoso", "comprobante"]
 
-# --- PAGE SETUP ---
-st.set_page_config(page_title="KPI Performance Dashboard", layout="wide")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Guatemala KPI Pro", page_icon="🇬🇹", layout="wide")
 
-# Custom CSS for Modern Design
+# Modern Styling
 st.markdown("""
     <style>
-    .main { background-color: #f5f7f9; }
-    .stMetric {
+    /* Main Background */
+    .stApp { background-color: #f8fafc; }
+    
+    /* Metric Card Styling */
+    div[data-testid="stMetric"] {
         background-color: #ffffff;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        border-left: 5px solid #007bff;
+        border-radius: 12px;
+        padding: 15px 20px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        border: 1px solid #e2e8f0;
     }
-    .stDataFrame { border-radius: 10px; }
-    h1 { color: #1e3a8a; font-family: 'Helvetica', sans-serif; }
-    .status-online { color: #10b981; font-weight: bold; }
+    
+    /* Table Styling */
+    .stTable {
+        background-color: white;
+        border-radius: 12px;
+        overflow: hidden;
+    }
+
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background-color: #1e293b;
+        color: white;
+    }
+    section[data-testid="stSidebar"] .stMarkdown h1, h2, h3 { color: white; }
+
+    /* Button Styling */
+    .stButton button {
+        border-radius: 8px;
+        font-weight: 500;
+        transition: all 0.3s;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 st_autorefresh(interval=5000, key="refresh")
 
-# --- DATABASE LOGIC (NO CHANGES) ---
+# --- DATABASE (NO CHANGES) ---
 def load_db():
     if os.path.exists(DB_FILE):
         try:
-            with open(DB_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            with open(DB_FILE, 'r', encoding='utf-8') as f: return json.load(f)
         except: return default_db()
     return default_db()
 
@@ -51,10 +71,9 @@ def default_db():
     return {'global_customers': [], 'staff_data': {}, 'total_deleted': 0, 'total_deposits': 0}
 
 def save_db(data):
-    with open(DB_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=4)
+    with open(DB_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, indent=4)
 
-# --- TELEGRAM WORKER (NO CHANGES) ---
+# --- TELEGRAM LOGIC (NO CHANGES) ---
 async def telegram_worker(phone, nickname, code=None, hash=None, password=None):
     session_path = f'session_{phone.replace("+","").strip()}'
     client = TelegramClient(session_path, API_ID, API_HASH)
@@ -62,22 +81,18 @@ async def telegram_worker(phone, nickname, code=None, hash=None, password=None):
         await client.connect()
         if not await client.is_user_authorized():
             if code:
-                try:
-                    await client.sign_in(phone, code, phone_code_hash=hash)
+                try: await client.sign_in(phone, code, phone_code_hash=hash)
                 except errors.SessionPasswordNeededError:
                     if password: await client.sign_in(password=password)
                     else: return "PASSWORD_NEEDED"
             else:
                 sent = await client.send_code_request(phone)
                 return sent.phone_code_hash
-
         db = load_db()
         if phone not in db['staff_data']:
             db['staff_data'][phone] = {'nickname': nickname, 'customers': [], 'under_age': [], 'depositors': [], 'status': "Online 🟢"}
-        else:
-            db['staff_data'][phone]['status'] = "Online 🟢"
+        else: db['staff_data'][phone]['status'] = "Online 🟢"
         save_db(db)
-
         @client.on(events.NewMessage(incoming=True))
         async def handler(event):
             if event.is_private:
@@ -113,79 +128,78 @@ def start_thread(phone, nickname):
         loop.run_until_complete(telegram_worker(phone, nickname))
     threading.Thread(target=run_loop, daemon=True).start()
 
-# --- MAIN UI ---
+# --- MAIN DASHBOARD ---
 db = load_db()
 
-# Sidebar Design
+# SIDEBAR: Modern Login UI
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=100)
-    st.title("Admin Portal")
+    st.title("🛡️ Admin Panel")
     st.markdown("---")
-    st.subheader("🔐 Staff Connection")
-    ph = st.text_input("Phone Number", placeholder="+95...")
-    nk = st.text_input("Staff Nickname", placeholder="Name")
-    
-    if "h_hash" not in st.session_state:
-        if st.button("Get OTP Code", use_container_width=True):
-            res = asyncio.run(telegram_worker(ph, nk))
-            if isinstance(res, str) and "Error" not in res:
-                st.session_state.h_hash = res; st.success("OTP Sent!")
-            else: st.error(res)
-    else:
-        otp = st.text_input("Enter 5-digit OTP")
-        pw = st.text_input("2FA Password (If any)", type="password")
-        if st.button("Authorize & Connect", use_container_width=True, type="primary"):
-            f = asyncio.run(telegram_worker(ph, nk, otp, st.session_state.h_hash, pw))
-            if f is None:
-                start_thread(ph, nk); st.success("Connected!"); del st.session_state.h_hash
-            else: st.error(f)
-
-# Header Section
-st.title("📈 Performance Analytics")
-st.markdown(f"**Last Sync:** {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-# Top Metrics with Design
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("🌐 Total Net Leads", len(db['global_customers']), delta="Real-time")
-m2.metric("💰 Verified Deposits", db['total_deposits'], delta="By OCR", delta_color="normal")
-m3.metric("🔞 Under-age (15-19)", sum(len(s.get('under_age', [])) for s in db['staff_data'].values()))
-m4.metric("🗑️ Total Deleted", db.get('total_deleted', 0))
-
-st.markdown("---")
-
-# Data Presentation Table
-st.subheader("👨‍💼 Active Team Performance")
-rows = []
-for p, s in db['staff_data'].items():
-    l, d = len(s['customers']), len(s['depositors'])
-    rows.append({
-        "Staff Name": s['nickname'],
-        "Telegram ID": p,
-        "Leads": l,
-        "Deposits": d,
-        "U-Age": len(s.get('under_age', [])),
-        "Conversion": f"{(d/l*100 if l>0 else 0):.1f}%",
-        "Status": "🟢 Active"
-    })
-
-if rows:
-    df = pd.DataFrame(rows)
-    st.table(df) # table ပုံစံက ပိုပြီး ရှင်းလင်းတည်ငြိမ်ပါတယ်
-else:
-    st.info("No active staff connected yet.")
-
-# Admin Tools Section
-st.markdown("---")
-st.subheader("🛠️ Management Tools")
-t1, t2 = st.columns(2)
-
-with t1:
-    with st.expander("📝 Manual Adjustments"):
-        staff_list = {f"{s['nickname']} ({p})": p for p, s in db['staff_data'].items()}
-        target = st.selectbox("Select Staff Account", list(staff_list.keys()) if staff_list else ["None"])
+    with st.container():
+        st.subheader("Connect Staff")
+        ph = st.text_input("Phone Number", placeholder="+95...")
+        nk = st.text_input("Nickname", placeholder="Staff Name")
         
-        btn_col1, btn_col2 = st.columns(2)
-        if btn_col1.button("➖ Delete Last Lead", use_container_width=True):
+        if "h_hash" not in st.session_state:
+            if st.button("🚀 Get OTP", use_container_width=True):
+                res = asyncio.run(telegram_worker(ph, nk))
+                if isinstance(res, str) and "Error" not in res:
+                    st.session_state.h_hash = res; st.success("OTP Sent!")
+                else: st.error(res)
+        else:
+            otp = st.text_input("Enter OTP Code")
+            pw = st.text_input("2FA Password", type="password")
+            if st.button("✅ Connect Account", use_container_width=True, type="primary"):
+                f = asyncio.run(telegram_worker(ph, nk, otp, st.session_state.h_hash, pw))
+                if f is None:
+                    start_thread(ph, nk); st.success("Connected!"); del st.session_state.h_hash
+                else: st.error(f)
+    
+    st.markdown("---")
+    if st.button("⚠️ Full System Reset", type="secondary", use_container_width=True):
+        if os.path.exists(DB_FILE): os.remove(DB_FILE)
+        st.rerun()
+
+# TOP HEADER
+st.title("🇬🇹 Guatemala Performance Dashboard")
+st.markdown("Monitoring your team's real-time productivity and verified deposits.")
+
+# METRIC CARDS
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("🌐 Total Net Leads", len(db['global_customers']))
+c2.metric("💰 Verified Deposits", db['total_deposits'])
+c3.metric("🔞 Under-age (15-19)", sum(len(s.get('under_age', [])) for s in db['staff_data'].values()))
+c4.metric("🗑️ Total Deleted", db.get('total_deleted', 0))
+
+st.markdown("---")
+
+# PERFORMANCE TABLE Section
+col_table, col_tools = st.columns([2, 1])
+
+with col_table:
+    st.subheader("👨‍💼 Team Status")
+    rows = []
+    for p, s in db['staff_data'].items():
+        l, d = len(s['customers']), len(s['depositors'])
+        rows.append({
+            "Staff": s['nickname'],
+            "Leads": l,
+            "Deposits": d,
+            "U-Age": len(s.get('under_age', [])),
+            "Conv %": f"{(d/l*100 if l>0 else 0):.1f}%"
+        })
+    if rows:
+        st.table(pd.DataFrame(rows))
+    else:
+        st.info("Waiting for staff connections...")
+
+with col_tools:
+    st.subheader("🛠️ Quick Actions")
+    staff_list = {f"{s['nickname']} ({p})": p for p, s in db['staff_data'].items()}
+    
+    with st.expander("Adjustment Tools"):
+        target = st.selectbox("Select Account", list(staff_list.keys()) if staff_list else ["None"])
+        if st.button("Delete Last Lead", use_container_width=True):
             if staff_list:
                 p_t = staff_list[target]
                 if db['staff_data'][p_t]['customers']:
@@ -193,7 +207,7 @@ with t1:
                     if cid in db['global_customers']: db['global_customers'].remove(cid)
                     db['total_deleted'] += 1; save_db(db); st.rerun()
                     
-        if btn_col2.button("📉 Deduct 1 Deposit", use_container_width=True):
+        if st.button("Deduct 1 Deposit", use_container_width=True):
             if staff_list:
                 p_t = staff_list[target]
                 if db['staff_data'][p_t]['depositors']:
@@ -201,21 +215,13 @@ with t1:
                     db['total_deposits'] = max(0, db['total_deposits'] - 1)
                     save_db(db); st.rerun()
 
-with t2:
-    with st.expander("⚙️ System Control"):
-        if st.button("🧹 Clear KPI Data (Keep Accounts)", use_container_width=True):
-            db['global_customers'] = []; db['total_deleted'] = 0; db['total_deposits'] = 0
-            for p in db['staff_data']:
-                db['staff_data'][p].update({'customers': [], 'depositors': [], 'under_age': []})
-            save_db(db); st.rerun()
-            
-        if st.button("🚪 Logout Selected Account", use_container_width=True):
-            if staff_list:
-                p_t = staff_list[target]
-                del db['staff_data'][p_t]
-                save_db(db); st.rerun()
+    if st.button("🧹 Reset All Numbers", use_container_width=True):
+        db['global_customers'] = []; db['total_deleted'] = 0; db['total_deposits'] = 0
+        for p in db['staff_data']:
+            db['staff_data'][p].update({'customers': [], 'depositors': [], 'under_age': []})
+        save_db(db); st.rerun()
 
-# Full Reset in Sidebar for safety
-if st.sidebar.button("⚠️ Full System Reset", type="secondary"):
-    if os.path.exists(DB_FILE): os.remove(DB_FILE)
-    st.rerun()
+    if st.button("🚪 Logout Selected", use_container_width=True):
+        if staff_list:
+            del db['staff_data'][staff_list[target]]
+            save_db(db); st.rerun()
